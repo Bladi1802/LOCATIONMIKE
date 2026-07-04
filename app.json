@@ -9,7 +9,12 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Necesitamos tu ubicación para compartirla con tus contactos.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Necesitamos tu ubicación en segundo plano para seguir compartiéndola aunque cierres la app.",
+        "NSLocationAlwaysUsageDescription": "Necesitamos tu ubicación en segundo plano para el rastreo continuo."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -19,10 +24,15 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
     },
     "web": {
-      "output": "static",
+      "bundler": "metro",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
@@ -37,6 +47,15 @@
           "dark": {
             "backgroundColor": "#000000"
           }
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Necesitamos tu ubicación para compartirla con tus contactos.",
+          "locationAlwaysPermission": "Necesitamos tu ubicación en segundo plano para el rastreo continuo.",
+          "locationWhenInUsePermission": "Necesitamos tu ubicación para compartirla con tus contactos.",
+          "isAndroidBackgroundLocationEnabled": true
         }
       ]
     ],

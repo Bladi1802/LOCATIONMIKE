@@ -1,50 +1,69 @@
-# Welcome to your Expo app 👋
+# MIKELOCATIONS
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+App móvil (iOS/Android) para compartir ubicación en tiempo real. Cada vez que te mueves 10 metros, envía automáticamente tu posición a un webhook de n8n.
 
-## Get started
+## Requisitos
 
-1. Install dependencies
+- Node.js 18+
+- Expo CLI (`npm install -g expo-cli`)
+- Dispositivo físico (iOS/Android) con Expo Go, o emulador
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Instalación
 
 ```bash
-npm run reset-project
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Dependencias principales
 
-## Learn more
+| Paquete             | Propósito                                      |
+| ------------------- | ---------------------------------------------- |
+| `expo-location`     | Obtener ubicación GPS (primer y segundo plano) |
+| `expo-task-manager` | Ejecutar tareas en segundo plano               |
+| `react-native-maps` | Mostrar Mapa con marcador de ubicación         |
+| `expo-router`       | Navegación por archivos                        |
 
-To learn more about developing your project with Expo, look at the following resources:
+## Uso
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+npx expo start
+```
 
-## Join the community
+Escanea el QR con **Expo Go** en tu celular, o presiona `a` para Android / `i` para iOS.
 
-Join our community of developers creating universal apps.
+## Cómo funciona
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+1. Al abrir la app pide permisos de ubicación (en primer y segundo plano).
+2. Muestra tu ubicación actual en un mapa.
+3. Presiona **"Iniciar Rastreo"** para comenzar a monitorear.
+4. Cada **10 metros** de desplazamiento, envía un POST con tu ubicación al webhook de n8n.
+5. El rastreo continúa incluso en segundo plano.
+6. Presiona **"Detener Rastreo"** para finalizar.
+
+### Payload enviado a n8n
+
+```json
+{
+  "latitude": 18.1234,
+  "longitude": -66.5678,
+  "timestamp": "2026-07-04T12:00:00.000Z",
+  "accuracy": 5,
+  "altitude": 50,
+  "speed": 1.2,
+  "heading": 180,
+  "deviceId": "mi-celular-001"
+}
+```
+
+## Configuración
+
+Edita la URL del webhook en `app/(tabs)/index.tsx`:
+
+```ts
+const N8N_WEBHOOK_URL = "https://tu-dominio.com/webhook/...";
+```
+
+## Notas
+
+- Solo funciona en iOS/Android. `react-native-maps` no es compatible con web.
+- El rastreo en segundo plano requiere permisos especiales (`ACCESS_BACKGROUND_LOCATION` en Android, `NSLocationAlways` en iOS).
