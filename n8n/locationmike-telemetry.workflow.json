@@ -1,0 +1,119 @@
+[
+  {
+    "id": "LOCATIONMIKE01",
+    "name": "LOCATIONMIKE - Telemetría por distancia",
+    "description": "Recibe, valida y normaliza telemetría GPS enviada por la app Expo cada 10 metros.",
+    "active": false,
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "0fe99c00-9754-476d-8119-bdec18fa3199",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [0, 0],
+        "id": "af417895-0c91-4468-b748-e88740142f3c",
+        "name": "Webhook - Recibir Telemetría",
+        "webhookId": "0fe99c00-9754-476d-8119-bdec18fa3199"
+      },
+      {
+        "parameters": {
+          "jsCode": "const input = $json.body ?? $json;\nconst missing = [];\nconst isNumber = (value) => typeof value === 'number' && Number.isFinite(value);\n\nif (!input.usuario || typeof input.usuario !== 'string') missing.push('usuario');\nif (!input.dispositivo?.nombre) missing.push('dispositivo.nombre');\nif (!input.dispositivo?.version) missing.push('dispositivo.version');\nif (!isNumber(input.ubicacion?.lat)) missing.push('ubicacion.lat');\nif (!isNumber(input.ubicacion?.lon)) missing.push('ubicacion.lon');\nif (!('altitud' in (input.ubicacion ?? {}))) missing.push('ubicacion.altitud');\nif (!('precision' in (input.ubicacion ?? {}))) missing.push('ubicacion.precision');\nif (!('velocidad' in (input.movimiento ?? {}))) missing.push('movimiento.velocidad');\nif (!input.movimiento?.marca_tiempo || Number.isNaN(Date.parse(input.movimiento.marca_tiempo))) missing.push('movimiento.marca_tiempo');\nif (!('bateria' in (input.estado ?? {}))) missing.push('estado.bateria');\n\nconst latitudeValid = isNumber(input.ubicacion?.lat) && input.ubicacion.lat >= -90 && input.ubicacion.lat <= 90;\nconst longitudeValid = isNumber(input.ubicacion?.lon) && input.ubicacion.lon >= -180 && input.ubicacion.lon <= 180;\nif (isNumber(input.ubicacion?.lat) && !latitudeValid) missing.push('ubicacion.lat fuera de rango');\nif (isNumber(input.ubicacion?.lon) && !longitudeValid) missing.push('ubicacion.lon fuera de rango');\n\nconst battery = input.estado?.bateria;\nif (battery !== null && (!isNumber(battery) || battery < 0 || battery > 1)) missing.push('estado.bateria fuera de rango');\n\nreturn [{\n  json: {\n    valido: missing.length === 0,\n    mensaje: missing.length === 0 ? 'Telemetría recibida correctamente' : 'Payload inválido',\n    errores: missing,\n    recibido_en: new Date().toISOString(),\n    telemetria: {\n      usuario: input.usuario ?? null,\n      dispositivo: {\n        nombre: input.dispositivo?.nombre ?? null,\n        version: input.dispositivo?.version ?? null\n      },\n      ubicacion: {\n        lat: input.ubicacion?.lat ?? null,\n        lon: input.ubicacion?.lon ?? null,\n        altitud: input.ubicacion?.altitud ?? null,\n        precision: input.ubicacion?.precision ?? null\n      },\n      movimiento: {\n        velocidad: input.movimiento?.velocidad ?? null,\n        marca_tiempo: input.movimiento?.marca_tiempo ?? null\n      },\n      estado: { bateria: battery ?? null }\n    }\n  },\n  pairedItem: { item: 0 }\n}];"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [260, 0],
+        "id": "abf9d780-79ca-42bc-a153-33e291f368cb",
+        "name": "Code - Validar y Normalizar"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "beb9d288-dbd8-4d04-ad4f-f46ddbe3acb4",
+                "leftValue": "={{ $json.valido }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [520, 0],
+        "id": "206d578c-b316-4552-9c1a-4e4920a7767e",
+        "name": "IF - Payload válido"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ { ok: true, mensaje: $json.mensaje, recibido_en: $json.recibido_en } }}",
+          "options": {
+            "responseCode": 200
+          }
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.5,
+        "position": [800, -100],
+        "id": "ba260499-f3a1-4362-9eb8-3501e67c491a",
+        "name": "Respond - 200 OK"
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ { ok: false, mensaje: $json.mensaje, errores: $json.errores } }}",
+          "options": {
+            "responseCode": 400
+          }
+        },
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.5,
+        "position": [800, 120],
+        "id": "a2aa255b-ae48-4e67-8607-e4fae5991094",
+        "name": "Respond - 400 Error"
+      }
+    ],
+    "connections": {
+      "Webhook - Recibir Telemetría": {
+        "main": [[{"node": "Code - Validar y Normalizar", "type": "main", "index": 0}]]
+      },
+      "Code - Validar y Normalizar": {
+        "main": [[{"node": "IF - Payload válido", "type": "main", "index": 0}]]
+      },
+      "IF - Payload válido": {
+        "main": [
+          [{"node": "Respond - 200 OK", "type": "main", "index": 0}],
+          [{"node": "Respond - 400 Error", "type": "main", "index": 0}]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "saveDataErrorExecution": "all",
+      "saveDataSuccessExecution": "all",
+      "saveManualExecutions": true,
+      "saveExecutionProgress": true,
+      "availableInMCP": false
+    },
+    "staticData": null,
+    "meta": {"templateCredsSetupCompleted": true},
+    "pinData": {},
+    "tags": []
+  }
+]

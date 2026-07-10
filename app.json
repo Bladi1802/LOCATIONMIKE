@@ -55,7 +55,9 @@
           "locationAlwaysAndWhenInUsePermission": "Necesitamos tu ubicación para compartirla con tus contactos.",
           "locationAlwaysPermission": "Necesitamos tu ubicación en segundo plano para el rastreo continuo.",
           "locationWhenInUsePermission": "Necesitamos tu ubicación para compartirla con tus contactos.",
-          "isAndroidBackgroundLocationEnabled": true
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "isIosBackgroundLocationEnabled": true
         }
       ]
     ],

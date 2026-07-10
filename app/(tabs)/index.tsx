@@ -1,13 +1,5 @@
-/**
- * app/(tabs)/index.tsx — Pantalla principal de MIKELOCATIONS
- *
- * Muestra un mapa con la ubicación actual y un botón para iniciar/detener
- * el rastreo en tiempo real. Cuando está activo, cada 10 metros de
- * desplazamiento envía la posición a un webhook de n8n.
- *
- * Dependencias: expo-location, expo-task-manager, react-native-maps
- */
-
+import * as Battery from "expo-battery";
+import * as Device from "expo-device";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import React, { useEffect, useState } from "react";
@@ -22,181 +14,220 @@ import {
 } from "react-native";
 import MapView, { Marker, PROVIDER_DEFAULT } from "react-native-maps";
 
-// Nombre interno con el que se registra la tarea en segundo plano.
 const LOCATION_TRACKING_TASK = "LOCATION_TRACKING_TASK";
-
-/** URL del webhook de n8n donde se enviarán los datos de ubicación. */
+const STUDENT_NAME = "Bladimir Mejia Hernandez";
 const N8N_WEBHOOK_URL =
-  "https://mike-cardona-170526.mikecardona076.com/webhook/0fe99c00-9754-476d-8119-bdec18fa3199";
+  "http://localhost:5678/webhook-test/0fe99c00-9754-476d-8119-bdec18fa3199";
 
-/**
- * Tarea que Expo ejecuta en segundo plano cada vez que el GPS reporta
- * una nueva ubicación (según distanceInterval/timeInterval).
- *
- * Recibe un array de ubicaciones y envía la más reciente a n8n.
- */
-TaskManager.defineTask(LOCATION_TRACKING_TASK, async ({ data, error }) => {
-  if (error) {
-    console.error("Error en la tarea de ubicación:", error);
-    return;
-  }
-  if (data) {
-    const { locations } = data as { locations: Location.LocationObject[] };
-    const location = locations[0];
-    if (location) {
-      const { latitude, longitude } = location.coords;
-      console.log(`Nueva ubicación detectada: ${latitude}, ${longitude}`);
-      await sendLocationToN8n(latitude, longitude, location.coords);
-    }
-  }
-});
+type LocationTaskData = { locations: Location.LocationObject[] };
 
-/**
- * Envía un POST al webhook de n8n con la ubicación actual y metadatos
- * (precisión, altitud, velocidad, rumbo, timestamp).
- */
-const sendLocationToN8n = async (
-  lat: number,
-  lon: number,
-  coords: Location.LocationObjectCoords,
-) => {
+const getDeviceName = () => {
+  const parts = [Device.brand, Device.modelName].filter(
+    (part, index, values): part is string =>
+      Boolean(part) && values.indexOf(part) === index,
+  );
+  return parts.join(" ") || Device.deviceName || "Dispositivo desconocido";
+};
+
+/** Construye y envía el payload extendido exigido por la actividad. */
+const sendLocationToN8n = async (location: Location.LocationObject) => {
   try {
+    const batteryLevel = await Battery.getBatteryLevelAsync();
+    const { latitude, longitude, altitude, accuracy, speed } = location.coords;
     const payload = {
-      latitude: lat,
-      longitude: lon,
-      timestamp: new Date().toISOString(),
-      accuracy: coords.accuracy,
-      altitude: coords.altitude,
-      speed: coords.speed,
-      heading: coords.heading,
-      deviceId: "mi-celular-001",
+      usuario: STUDENT_NAME,
+      dispositivo: {
+        nombre: getDeviceName(),
+        version:
+          [Device.osName, Device.osVersion].filter(Boolean).join(" ") ||
+          "Versión desconocida",
+      },
+      ubicacion: {
+        lat: latitude,
+        lon: longitude,
+        altitud: altitude,
+        precision: accuracy,
+      },
+      movimiento: {
+        velocidad: speed,
+        marca_tiempo: new Date(location.timestamp).toISOString(),
+      },
+      estado: { bateria: batteryLevel >= 0 ? batteryLevel : null },
     };
 
-    console.log("Enviando datos a n8n...", payload);
-
+    console.log("Enviando telemetría a n8n:", JSON.stringify(payload, null, 2));
     const response = await fetch(N8N_WEBHOOK_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(payload),
     });
-
+    const body = await response.text();
     if (!response.ok) {
       throw new Error(
-        `Error en la red: ${response.status} ${response.statusText}`,
+        `n8n respondió ${response.status}: ${body || response.statusText}`,
       );
     }
-
-    const result = await response.json();
-    console.log("n8n respondió:", result);
+    console.log("Telemetría recibida por n8n:", body || "sin contenido");
   } catch (error) {
-    console.error("Error enviando a n8n:", error);
+    console.error("No se pudo enviar la telemetría a n8n:", error);
   }
 };
 
-/**
- * Pantalla principal.
- *
- * 1. Pide permisos de ubicación (primer y segundo plano).
- * 2. Obtiene la ubicación actual y la centra en el mapa.
- * 3. Muestra un botón para iniciar/detener el rastreo.
- *
- * Cuando el rastreo está activo, expo-location ejecuta la tarea
- * LOCATION_TRACKING_TASK cada 10 metros (distanceInterval: 10).
- */
+// Expo requiere definir las tareas de segundo plano en el ámbito global.
+TaskManager.defineTask(LOCATION_TRACKING_TASK, async ({ data, error }) => {
+  if (error) {
+    console.error("Error en la tarea de ubicación:", error.message);
+    return;
+  }
+  const locations = (data as LocationTaskData | undefined)?.locations;
+  const newestLocation = locations?.at(-1);
+  if (newestLocation) await sendLocationToN8n(newestLocation);
+});
+
+const requestBackgroundPermission = () =>
+  new Promise<boolean>((resolve) => {
+    Alert.alert(
+      "Ubicación en segundo plano",
+      "Para registrar cada tramo de 10 metros aunque minimices la app, selecciona Permitir siempre.",
+      [
+        { text: "Cancelar", style: "cancel", onPress: () => resolve(false) },
+        {
+          text: "Continuar",
+          onPress: async () => {
+            const permission =
+              await Location.requestBackgroundPermissionsAsync();
+            resolve(permission.status === "granted");
+          },
+        },
+      ],
+      { cancelable: false },
+    );
+  });
+
 export default function Index() {
-  // Indica si el rastreo está activo en este momento.
   const [isTracking, setIsTracking] = useState(false);
-
-  // Mientras se cargan permisos y ubicación inicial.
   const [isLoading, setIsLoading] = useState(true);
-
-  // Coordenadas de la última ubicación obtenida.
   const [currentLocation, setCurrentLocation] =
     useState<Location.LocationObjectCoords | null>(null);
-
-  // Región visible del mapa (centro y zoom).
   const [mapRegion, setMapRegion] = useState({
     latitude: 37.78825,
     longitude: -122.4324,
-    latitudeDelta: 0.0922,
-    longitudeDelta: 0.0421,
+    latitudeDelta: 0.01,
+    longitudeDelta: 0.01,
   });
 
-  // Inicialización al montar el componente.
+  const updateMapLocation = (location: Location.LocationObject) => {
+    const { latitude, longitude } = location.coords;
+    setCurrentLocation(location.coords);
+    setMapRegion((region) => ({ ...region, latitude, longitude }));
+  };
+
   useEffect(() => {
-    (async () => {
-      // 1. Permiso de ubicación en primer plano (obligatorio).
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert(
-          "Permiso denegado",
-          "Por favor, permite el acceso a la ubicación para usar la app.",
+    let mounted = true;
+    let mapSubscription: Location.LocationSubscription | undefined;
+    const initialize = async () => {
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (permission.status !== "granted") {
+          Alert.alert(
+            "Permiso denegado",
+            "Permite el acceso a la ubicación para usar el rastreador.",
+          );
+          return;
+        }
+        const initialLocation = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        if (!mounted) return;
+        updateMapLocation(initialLocation);
+
+        // Actualiza el mapa; el POST se hace en la tarea background para no duplicarlo.
+        mapSubscription = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.High, distanceInterval: 10 },
+          (location) => {
+            if (mounted) updateMapLocation(location);
+          },
         );
-        setIsLoading(false);
-        return;
-      }
-
-      // 2. Permiso de ubicación en segundo plano (opcional, pero recomendado).
-      let bgStatus = await Location.requestBackgroundPermissionsAsync();
-      if (bgStatus.status !== "granted") {
-        console.log(
-          "Permiso de segundo plano denegado. Solo funcionará en primer plano.",
+        const started = await Location.hasStartedLocationUpdatesAsync(
+          LOCATION_TRACKING_TASK,
         );
+        if (mounted) setIsTracking(started);
+      } catch (error) {
+        console.error("No se pudo inicializar la ubicación:", error);
+        Alert.alert("Error", "No fue posible obtener la ubicación actual.");
+      } finally {
+        if (mounted) setIsLoading(false);
       }
-
-      // 3. Obtener ubicación actual para centrar el mapa.
-      let currentLoc = await Location.getCurrentPositionAsync({});
-      setCurrentLocation(currentLoc.coords);
-      setMapRegion({
-        latitude: currentLoc.coords.latitude,
-        longitude: currentLoc.coords.longitude,
-        latitudeDelta: 0.0922,
-        longitudeDelta: 0.0421,
-      });
-
-      // 4. Verificar si ya hay una tarea de rastreo registrada (ej. porque la
-      //    app se reabrió sin haber detenido el rastreo explícitamente).
-      const hasStarted = await TaskManager.isTaskRegisteredAsync(
-        LOCATION_TRACKING_TASK,
-      );
-      setIsTracking(hasStarted);
-      setIsLoading(false);
-    })();
+    };
+    initialize();
+    return () => {
+      mounted = false;
+      mapSubscription?.remove();
+    };
   }, []);
 
-  /** Inicia el rastreo continuo. Se dispara cada 10 m de desplazamiento. */
   const startTracking = async () => {
     try {
+      const foreground = await Location.getForegroundPermissionsAsync();
+      if (foreground.status !== "granted") {
+        Alert.alert("Permiso requerido", "Activa el permiso de ubicación.");
+        return;
+      }
+      let background = await Location.getBackgroundPermissionsAsync();
+      if (background.status !== "granted") {
+        const granted = await requestBackgroundPermission();
+        if (!granted) {
+          Alert.alert(
+            "Permiso requerido",
+            "El rastreo en segundo plano necesita Permitir siempre.",
+          );
+          return;
+        }
+        background = await Location.getBackgroundPermissionsAsync();
+      }
+      if (background.status !== "granted") return;
+
       await Location.startLocationUpdatesAsync(LOCATION_TRACKING_TASK, {
         accuracy: Location.Accuracy.High,
-        timeInterval: 10000,
         distanceInterval: 10,
+        activityType: Location.ActivityType.Fitness,
+        pausesUpdatesAutomatically: false,
         showsBackgroundLocationIndicator: true,
-        deferredUpdatesInterval: 10000,
+        foregroundService: {
+          notificationTitle: "MIKELOCATIONS está rastreando",
+          notificationBody: "Se enviará telemetría cada 10 metros.",
+          notificationColor: "#6C63FF",
+        },
       });
       setIsTracking(true);
       Alert.alert(
-        "Rastreando",
-        "Tu ubicación se está compartiendo cada 10 metros.",
+        "Rastreo activo",
+        "La telemetría se enviará automáticamente cada 10 metros.",
       );
-    } catch (err) {
-      console.error(err);
+    } catch (error) {
+      console.error("No se pudo iniciar el rastreo:", error);
       Alert.alert("Error", "No se pudo iniciar el rastreo.");
     }
   };
 
-  /** Detiene el rastreo y libera los recursos del GPS. */
   const stopTracking = async () => {
     try {
-      await Location.stopLocationUpdatesAsync(LOCATION_TRACKING_TASK);
+      const started = await Location.hasStartedLocationUpdatesAsync(
+        LOCATION_TRACKING_TASK,
+      );
+      if (started)
+        await Location.stopLocationUpdatesAsync(LOCATION_TRACKING_TASK);
       setIsTracking(false);
-      Alert.alert("Detenido", "Has dejado de compartir tu ubicación.");
-    } catch (err) {
-      console.error(err);
+      Alert.alert("Rastreo detenido", "Se detuvo el envío de telemetría.");
+    } catch (error) {
+      console.error("No se pudo detener el rastreo:", error);
+      Alert.alert("Error", "No se pudo detener el rastreo.");
     }
   };
 
-  // Pantalla de carga mientras se obtienen permisos y ubicación.
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -209,14 +240,12 @@ export default function Index() {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-
-      {/* Mapa de la ubicación actual */}
       <MapView
         style={styles.map}
         region={mapRegion}
         provider={PROVIDER_DEFAULT}
-        showsUserLocation={true}
-        showsMyLocationButton={true}
+        showsUserLocation
+        showsMyLocationButton
       >
         {currentLocation && (
           <Marker
@@ -225,14 +254,11 @@ export default function Index() {
               longitude: currentLocation.longitude,
             }}
             title="Estás aquí"
-            description="Tu ubicación actual"
+            description="Última ubicación registrada"
           />
         )}
       </MapView>
-
-      {/* Panel de control superpuesto en la parte inferior */}
       <View style={styles.controlPanel}>
-        {/* Indicador de estado (verde = rastreando, rojo = detenido) */}
         <View style={styles.statusContainer}>
           <View
             style={[
@@ -244,16 +270,12 @@ export default function Index() {
             {isTracking ? "Compartiendo ubicación" : "Ubicación detenida"}
           </Text>
         </View>
-
-        {/* Coordenadas actuales en formato legible */}
         {currentLocation && (
           <Text style={styles.coordsText}>
-            Lat: {currentLocation.latitude.toFixed(4)} | Lon:{" "}
-            {currentLocation.longitude.toFixed(4)}
+            Lat: {currentLocation.latitude.toFixed(5)} | Lon:{" "}
+            {currentLocation.longitude.toFixed(5)}
           </Text>
         )}
-
-        {/* Botón principal: inicia o detiene el rastreo */}
         <TouchableOpacity
           style={[
             styles.button,
@@ -270,35 +292,22 @@ export default function Index() {
   );
 }
 
-/**
- * Estilos de la pantalla.
- * Tema oscuro con panel de control semitransparente al fondo.
- */
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#121212",
   },
-  loadingText: {
-    color: "#fff",
-    marginTop: 15,
-    fontSize: 16,
-  },
-  map: {
-    width: "100%",
-    height: "100%",
-  },
+  loadingText: { color: "#fff", marginTop: 15, fontSize: 16 },
+  map: { width: "100%", height: "100%" },
   controlPanel: {
     position: "absolute",
     bottom: 40,
     left: 20,
     right: 20,
-    backgroundColor: "rgba(30, 30, 30, 0.9)",
+    backgroundColor: "rgba(30, 30, 30, 0.92)",
     borderRadius: 20,
     padding: 20,
     alignItems: "center",
@@ -313,17 +322,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
-  statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 8,
-  },
-  statusText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
+  statusDot: { width: 12, height: 12, borderRadius: 6, marginRight: 8 },
+  statusText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
   coordsText: {
     color: "#aaa",
     fontSize: 14,
@@ -336,15 +336,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
   },
-  startButton: {
-    backgroundColor: "#6C63FF",
-  },
-  stopButton: {
-    backgroundColor: "#FF4B4B",
-  },
-  buttonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
+  startButton: { backgroundColor: "#6C63FF" },
+  stopButton: { backgroundColor: "#FF4B4B" },
+  buttonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
 });
